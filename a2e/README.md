@@ -27,7 +27,7 @@ And that's it! Setup is complete. All future methods will revolve around this `a
 Authentication is very simple with this module. This module supports both __basic__ and __certificate__ authentication protocols. The basic methods do not use a certificate, expire more quickly, and do not support two-factor authentication. The other methods in this module will not work without proper authentication. When an A2e instance is created, the constructor looks for any existing certificates in `~/.cert` and tries to renews it. Alternatively, a certificate can be passed into the constructor:
 
 ```python
-a2e = A2e.A2e(<cert>)
+a2e = A2e(<cert>)
 ```
 
 If the certificate is valid, it will be renewed and written to the `~/.cert` file. Otherwise, it defaults to basic guest authentication. The following are the different authentication methods:
@@ -72,7 +72,7 @@ The documentation for constructing the filter argument can be found [here](https
 
 There are two ways to download files using this module. The first places an order for the files, gets the download urls, and downloads the files to the provided path. The second uses the `/downloads` api method to search for the files and download them to the provided path in one step. The latter is dangerous if you don't know how many files you are about to download!
 
-#### `a2e.download_files(files, path='/var/tmp/', force=False)`
+#### `a2e.download_files(files, dataset, path='/var/tmp/', force=False)`
 
 Provided with a list of files, place an order for the files and download them. The path specifies the directory the files will download to, and the force flag determines whether files will be overriden. By default, if a file already exists, it will not be downloaded. Does not work using guest credentials because guests cannot place an order.
 
@@ -87,13 +87,15 @@ from A2e import A2e
 
 a2e = A2e.A2e()
 
+dataset = "wfip2/lidar.z01.b0"
+
 files = a2e.search({
-    'Dataset': 'wfip2/lidar.z01.b0',
+    'Dataset': dataset,
     'date_time': {
         'between': ['20160101000000', '20160104000000']
     },
     'file_type': 'nc',
 })
 
-a2e.download_files(files, force=True)
+a2e.download_files(files, dataset, force=True)
 ```

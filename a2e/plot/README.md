@@ -1,10 +1,13 @@
 # a2e.plot Package
 
-This package contains the plot module. The package requires both matplotlib and numpy as dependencies apart from the standard python core library.
+This package contains the plot module. The package requires matplotlib, numpy, and xarray as dependencies, in addition to the standard Python core libraries.
 
 ## plot Module
 
-This module is useful for plotting different variables against each other using matplotlib in just one line of code. This is designed for users who just want to see their data and run simple analysies.
+
+This module is useful for plotting different variables against each other using matplotlib in just one line of code. It is designed for users who want a quick way to visualize their NetCDF data and run simple analyses.
+
+The module supports NetCDF-4 files (including compression and groups) using the xarray interface.
 
 ## Setup
 
@@ -51,6 +54,10 @@ Width of each plot in inches.
 
 Height of each plot in inches.
 
+##### `hspace`
+
+Vertical spacing between subplots. Default is `0.4`.
+  
 ## Example
 
 ```python
