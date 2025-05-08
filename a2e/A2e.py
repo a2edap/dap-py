@@ -219,7 +219,7 @@ class A2e:
     # Placing Orders
     # --------------------------------------------------------------
 
-    def _place_order(self, files):
+    def _place_order(self, dataset, files):
         '''Place an order and return the order ID
         '''
         if not self._auth:
@@ -227,6 +227,7 @@ class A2e:
 
         params = {
             'files': files,
+            "dataset" : dataset
         }
 
         req = requests.put(
@@ -292,11 +293,10 @@ class A2e:
         for url in urls:
             try:
                 a = url.split('/')
-                filename = a[5].split('?')[0]
 
-                dataset = '{}.{}'.format(
-                    a[4], '.'.join(a[5].split('.')[:3])
-                )
+                filename = a[8].split('?')[0]
+
+                dataset = a[4]
 
                 # /var/tmp/wfip2.lidar.z01.b0
                 download_dir = os.path.join(path, dataset)
@@ -328,7 +328,7 @@ class A2e:
     # Place Order and Download
     # --------------------------------------------------------------
 
-    def download_files(self, files, path='/var/tmp/', force=False):
+    def download_files(self, files, dataset, path='/var/tmp/', force=False):
         '''places order, gets download urls, downloads files
         '''
         if not files:
@@ -336,7 +336,7 @@ class A2e:
             return
 
         try:
-            ID = self._place_order(files)
+            ID = self._place_order( dataset, files)
         except BadStatusCodeError as e:
             self._print('Could not place order')
             self._print(e)

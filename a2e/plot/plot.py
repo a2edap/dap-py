@@ -2,289 +2,187 @@
 File: plot.py
 Authors: Logan Dihel
 Date: 5/25/2018
-Last Modified: 5/29/2018
+Last Modified: 5/07/2025
 Description: This module is a high-level interface
 for manipulating and graphing netcdf4 files.
 '''
 
 import os
 import re
-import sys
 import numpy as np
-from netCDF4 import Dataset
-from netCDF4 import MFDataset
+import xarray as xr
 import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
-
+from datetime import datetime
 
 class Plotter:
     def __init__(self, path, regexes=[r'.*?']):
-        '''Load every file in a path that matches the regex.
-        Then jumble all the data up together.
-        '''
-        files = [os.path.join(path, x) \
-                for x in os.listdir(path) \
-                if any(re.match(pattern, x) for pattern in regexes)]
+        '''Load every file in a path that matches the regex.'''
+        files = [os.path.join(path, x)
+                 for x in os.listdir(path)
+                 if any(re.match(pattern, x) for pattern in regexes)]
 
         if not files:
             print('No files found matching')
             return
 
-        self.time = np.array([])
-        # normalize time first
-        fhs = [Dataset(x) for x in files]
-        fhs.sort(key=lambda fh: fh.variables['time'].getncattr('units'))
-        base_time = datetime.strptime(
-            ' '.join(fhs[0].variables['time'].getncattr('units').split(' ')[2:4]),
-            '%Y-%m-%d %H:%M:%S')
-        epoch = datetime.utcfromtimestamp(0)
-        for fh in fhs:
-            abs_time = datetime.strptime(
-                ' '.join(fh.variables['time'].getncattr('units').split(' ')[2:4]),
-                '%Y-%m-%d %H:%M:%S'
-            )
-            dt = abs_time - base_time
-            time_data = fh.variables['time'][:]
-            correction = np.full_like(time_data, dt.total_seconds() + \
-                (base_time - epoch).total_seconds()) # offset by X seconds
-            adjep_data = time_data + correction
-            self.time = np.append(
-                self.time, np.array([datetime.utcfromtimestamp(x) for x in adjep_data])
-            )
+        # Load all NetCDF files with xarray
+        self.ds = xr.open_mfdataset(files, combine='by_coords')
+        self.time = self.ds['time'].values.astype('datetime64[ns]').astype(datetime)
 
-        # get the rest of the data
-        self.mf = MFDataset(files)
-
-    def plot(self, *variable_groups, begin=None, end=None, width=18, height=6):
-        '''public function for plotting a list of regex tuples/lists/sets
-        calls the private _plot method after creating all of the plot groups
-        in the correct format. The purpose of this function is two fold:
-            1.  Determine the number of plots that will be plotted
-            2.  Package all of the plots in a manner that is easy
-                to loop over and generate plots quickly
-        '''
-
+    def plot(self, *variable_groups, begin=None, end=None, width=18, height=6, hspace=0.4):
         if begin and end and begin >= end:
             print('Begin time must be before end time')
             return
 
         plot_groups = []
-        variable_groups = [x if type(x) == list else [x] \
-            for x in variable_groups]
-
-        # by default, graph everything
+        variable_groups = [x if isinstance(x, list) else [x] for x in variable_groups]
         if not variable_groups:
             variable_groups = [['.*?']]
 
         for group in variable_groups:
-            
             try:
-                var_names = {x for pattern in group \
-                    for x in self.mf.variables.keys() \
-                    if re.search(pattern, x)}
+                var_names = {x for pattern in group
+                             for x in self.ds.variables.keys()
+                             if re.search(pattern, x)}
             except:
-                print('Incorrectly formatted regex expression in group: ', group)
+                print('Incorrectly formatted regex in group:', group)
                 continue
 
-            shapes = {self.mf.variables[x][:].shape for x in var_names}
+            shapes = {self.ds[x].shape for x in var_names}
             if len(shapes) != 1:
-                # group the variables into the largest chunks that will graph together
-                # based on shape and add this back into variable_groups to process again
                 for shape in shapes:
                     variable_groups.append(
-                        ['^{}$'.format(x) for x in var_names if self.mf.variables[x][:].shape == shape]
+                        ['^{}$'.format(x) for x in var_names if self.ds[x].shape == shape]
                     )
                 continue
 
-            dimensioned_by = {self.mf.variables[x].dimensions for x in var_names}
-            if len(dimensioned_by) != 1:
-                # group the variables into the largest chunks that will graph together
-                # based on dim and add this back into variable_groups to process again
-                for dim in dimensioned_by:
+            dims = {self.ds[x].dims for x in var_names}
+            if len(dims) != 1:
+                for d in dims:
                     variable_groups.append(
-                        ['^{}$'.format(x) for x in var_names if self.mf.variables[x].dimensions == dim]
+                        ['^{}$'.format(x) for x in var_names if self.ds[x].dims == d]
                     )
                 continue
 
-            units = {self.mf.variables[x].units \
-                if 'units' in self.mf.variables[x].ncattrs() else None \
-                for x in var_names}
+            units = {self.ds[x].attrs.get('units', None) for x in var_names}
             if len(units) != 1:
-                # group the variables into the largest chunks that will graph together
-                # based on units and add this back into variable_groups to process again
-                for unit in units:
-                    appendage = []
-                    for x in var_names:
-                        status = False
-                        try:
-                            status = (self.mf.variables[x].units == unit)
-                        except AttributeError:
-                            # has no units value
-                            # this is faster than checking for units in ncattrs()
-                            status = (unit == None)
-                        finally:
-                            if status:
-                                appendage.append('^{}$'.format(x))
-                    variable_groups.append(appendage)
+                for u in units:
+                    variable_groups.append(
+                        ['^{}$'.format(x) for x in var_names if self.ds[x].attrs.get('units', None) == u]
+                    )
                 continue
 
             shape = list(shapes)[0]
             dimensions = len(shape)
             if dimensions == 0:
-                plot_groups.append({
-                    'names': var_names,
-                    'dimensions': [],
-                    'slice': []
-                })
-
+                plot_groups.append({'names': var_names, 'dimensions': [], 'slice': []})
             elif dimensions == 1:
-                plot_groups.append({
-                    'names': var_names,
-                    'dimensions': list(dimensioned_by)[0],
-                    'slice': [None]
-                })
-
+                plot_groups.append({'names': var_names, 'dimensions': list(dims)[0], 'slice': [None]})
             elif dimensions == 2:
                 for column in range(shape[1]):
                     plot_groups.append({
                         'names': var_names,
-                        'dimensions': list(dimensioned_by)[0],
+                        'dimensions': list(dims)[0],
                         'slice': [None, column]
                     })
-
             else:
-                print('3 dimensional matrix plots are not yet implemented')
-                continue
+                print('3D variables not supported yet.')
 
         if plot_groups:
-            self._plot(plot_groups, begin, end, width, height)
+            self._plot(plot_groups, begin, end, width, height, hspace)
         else:
             print('No variables to plot')
 
-    def _plot(self, plot_groups, begin, end, width, height):
-        '''actually plots the data
-        '''
+    def _plot(self, plot_groups, begin, end, width, height, hspace):
         num_plots = len(plot_groups)
         fig = plt.figure(figsize=(width, height * num_plots))
         colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w']
 
-        # slice the time range
-        start_index = bin_search(self.time, begin) \
-            if begin else 0
-        end_index = bin_search(self.time, end) + 1 \
-            if end else self.time.size
+        start_index = bin_search(self.time, begin) if begin else 0
+        end_index = bin_search(self.time, end) + 1 if end else self.time.size
 
         for i, group in enumerate(plot_groups):
-            
-            dimensions = len(group['dimensions'])
-            ax = fig.add_subplot(num_plots, 1, i+1)
+            ax = fig.add_subplot(num_plots, 1, i + 1)
             var_names = group['names']
+            dimensions = len(group['dimensions'])
 
             for j, var_name in enumerate(var_names):
-                # plot each variable on the same graph
-                if dimensions == 0:
-                    y = np.ma.masked_greater(
-                        self.mf.variables[var_name][start_index:end_index],
-                        9e+36
-                    )
+                data = self.ds[var_name].values
 
-                    if y.count() > 0:
-                        ax.plot(y,marker='o', color=colors[j % len(colors)])
+                if dimensions == 0:
+                    y = data
+                    if is_numeric_array(y):
+                        y = np.ma.masked_greater(y, 9e+36)
+                    if y.size > 0:
+                        ax.plot(y, marker='o', color=colors[j % len(colors)])
 
                 elif dimensions == 1:
-                    y = np.ma.masked_greater(
-                        self.mf.variables[var_name][start_index:end_index],
-                        9e+36
-                    )
-
+                    y = data[start_index:end_index]
+                    if is_numeric_array(y):
+                        y = np.ma.masked_greater(y, 9e+36)
                     if 'time' in group['dimensions']:
-                        if y.count() > 0:
-                            x = self.time[start_index:end_index]
-                            ax.plot(x, y, marker='o', color=colors[j % len(colors)])
+                        x = self.time[start_index:end_index]
+                        ax.plot(x, y, marker='o', color=colors[j % len(colors)])
                     else:
                         ax.plot(y, marker='o', color=colors[j % len(colors)])
 
                 elif dimensions == 2:
-                    y = np.ma.masked_greater(
-                        self.mf.variables[var_name][start_index:end_index][:,group['slice'][1]],
-                        9e+36
-                    )
-
+                    y = data[start_index:end_index, group['slice'][1]]
+                    if is_numeric_array(y):
+                        y = np.ma.masked_greater(y, 9e+36)
                     if 'time' in group['dimensions']:
-                        if y.count() > 0:
-                            x = self.time[start_index:end_index]
-                            ax.plot(x, y, marker='o', color=colors[j % len(colors)])
+                        x = self.time[start_index:end_index]
+                        ax.plot(x, y, marker='o', color=colors[j % len(colors)])
                     else:
                         ax.plot(y, marker='o', color=colors[j % len(colors)])
 
-                else:
-                    print('Not implemented')
-
-            # xlabel
+            # X labels
             if dimensions == 0:
                 ax.set_xlabel('data point')
             elif dimensions == 1:
                 ax.set_xlabel(group['dimensions'][0])
             elif dimensions == 2:
                 try:
-                    ax.set_xlabel('{}, {}({})'.format(
-                        group['dimensions'][0],
-                        group['dimensions'][1],
-                        str(self.mf.variables[group['dimensions'][1]][:][group['slice'][1]]) \
-                            + ' ' + str(self.mf.variables[group['dimensions'][1]].units)
-                    ))
+                    dim1 = group['dimensions'][1]
+                    val = self.ds[dim1].values[group['slice'][1]]
+                    unit = self.ds[dim1].attrs.get('units', '')
+                    ax.set_xlabel(f"{group['dimensions'][0]}, {dim1} ({val} {unit})")
                 except:
-                    ax.set_xlabel('{}, {}({})'.format(
-                        group['dimensions'][0],
-                        group['dimensions'][1],
-                        group['slice'][1]
-                    ))
-            else:
-                print('Not implemented')
-
+                    ax.set_xlabel(f"{group['dimensions'][0]}, {group['dimensions'][1]} ({group['slice'][1]})")
             ax.set_title(', '.join(var_names))
 
             try:
-                ax.set_ylabel(', '.join({self.mf.variables[x].units for x in var_names}))
-                ax.legend(['{} ({})'.format(x, self.mf.variables[x].units) \
-                    for x in var_names
-                ])
+                y_units = ', '.join({self.ds[x].attrs['units'] for x in var_names})
+                ax.set_ylabel(y_units)
+                ax.legend([f"{x} ({self.ds[x].attrs['units']})" for x in var_names])
             except:
                 ax.set_ylabel('???')
-                ax.legend(['{}'.format(x) \
-                    for x in var_names
-                ])
-
+                ax.legend([x for x in var_names])
             ax.grid()
 
+        plt.subplots_adjust(hspace=hspace)  
         plt.show()
 
 
-# ----------------------------------------------------
-# - Helper Methods -----------------------------------
-# ----------------------------------------------------
-
-def gcd(a, b):
-    while b != 0:
-        a, b = b, a % b
-    return a
-
-def lcm(a, b):
-    return a * b // gcd(b, a)
+# -------------------------------------------
+# Helper Functions
+# -------------------------------------------
 
 def bin_search(a, d):
+    '''Binary search helper for time slicing'''
     first = 0
     last = len(a) - 1
-    found = False
     m = -1
-    
-    while first <= last and not found:
+
+    while first <= last:
         m = (first + last) // 2
         if a[m] == d:
             return m
+        elif a[m] > d:
+            last = m - 1
         else:
-            if a[m] > d:
-                last = m - 1
-            else:
-                first = m + 1
+            first = m + 1
     return m
+
+def is_numeric_array(x):
+    return np.issubdtype(x.dtype, np.number)
