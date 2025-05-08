@@ -160,9 +160,7 @@ class Plotter:
                 ax.legend([x for x in var_names])
             ax.grid()
 
-        # plt.tight_layout()
-        # plt.show()
-        plt.subplots_adjust(hspace=hspace)  # Increase vertical space between plots
+        plt.subplots_adjust(hspace=hspace)  
         plt.show()
 
 
